@@ -2,12 +2,12 @@
 
 ## Build
     
-    ```bash
-    $ yarn build
-    ```
+```
+$ yarn build
+```
 
 ## Dev/watch
 
-    ```bash
-    $ yarn watch
-    ```
+```
+$ yarn watch
+```
