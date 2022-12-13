@@ -1,135 +1,177 @@
-import { ChainAPI, crypto, EsploraTx, EsploraUtxo, IdentityInterface, IdentityType, MasterPublicKey, Mnemonic, Output, Restorer, restorerFromState, TxInterface } from 'ldk';
+import { address, AddressInterface, ChainAPI, crypto, EsploraTx, EsploraUtxo, IdentityInterface, IdentityType, MasterPublicKey, Mnemonic, Output, Restorer, restorerFromState, TxInterface } from 'ldk';
 import * as ecc from 'tiny-secp256k1';
+
+
+// storage key
+const HistoryKey = (scripthash: string) => `history:${scripthash}`;
+const AddressInfosKey = (scripthash: string) => `address_infos:${scripthash}`;
+
+const isHistoryKey = (key: string) => key.startsWith('history:');
+const isAddressInfosKey = (key: string) => key.startsWith('address_infos:');
+
+
+/* 
+MainAccount m/84'/1776'/0'
+
+0. counter external/internal 0 - 0 
+1. pubkey > scriptHash - parent - store 
+2. get_history - worker - store > 0 txs
+3. tx.get - worker
+4. unblind - worker 
+
+
+*/
+
+
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return; // skip non local changes
+
+    for (const key in changes) {
+        const change = changes[key];
+        console.log('storage changed', key, change);
+        // change { newValue: '', oldValue: '' }
+        if (isHistoryKey(key)) {
+            // handle counter
+            // get txs hexes
+            // get prevouts
+        } else if (isAddressInfosKey(key)) {
+            // unblind utxos 
+        }
+    }
+});
+
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request.message === 'start_restore') {
         const mnemonic = request.mnemonic;
 
-        const identity = new Mnemonic({
-            chain: 'testnet',
-            ecclib: ecc,
-            type: IdentityType.Mnemonic,
-            opts: {
-                mnemonic: mnemonic,
-            }
-        })
+        // bip32.derive
+        // get_history 30
+        // storage.outpoints
 
-        const watchonlyIdentity = new MasterPublicKey({
-            chain: 'testnet',
-            ecclib: ecc,
-            type: IdentityType.MasterPublicKey,
-            opts: {
-                masterPublicKey: identity.masterPublicKey,
-                masterBlindingKey: identity.masterBlindingKey,
-            }
-        })
+        // blockchain.transaction.get
+        // storage.{outpoint: prevouts}
 
-        const restorer = makeRestorerFromChainAPI(
-            watchonlyIdentity,
-            (isChange, index) => watchonlyIdentity.getAddress(isChange, index).address.confidentialAddress
-        )
+        // unblinding with key
+        // storage.{outpint: unblindData}
 
         return new Promise(async (resolve, reject) => {
-            try {
-                const masterPubKey = await restorer({ api: new BatchServerFetchAPI('https://electrs-batch-testnet.vulpem.com'), gapLimit: 30 })
-                const addresses = await masterPubKey.getAddresses()
-                console.log('addresses', addresses)
-                resolve({ masterPubKey: masterPubKey })
-            } catch (err) {
-                console.log('error', err)
-                reject({ error: err })
+            console.log('start restore', mnemonic)
+            console.time('restore');
+            const identity = new Mnemonic({
+                chain: 'testnet',
+                ecclib: ecc,
+                type: IdentityType.Mnemonic,
+                opts: {
+                    mnemonic: mnemonic,
+                }
+            });
+
+            const ws = new WebSocket('wss://blockstream.info/liquidtestnet/electrum-websocket/api');
+
+
+            const GAP_LIMIT = 20;
+            let count = 0;
+            let index = 0;
+            let restoredIndex = 0;
+            while (count < GAP_LIMIT) {
+                const addr = identity.getAddress(false, index);
+                index++;
+                const history = await getHistory(ws, addr.address.confidentialAddress);
+                if (history.length > 0) {
+                    count = 0;
+                    restoredIndex = index;
+                } else {
+                    count++;
+                }
             }
-        })
+
+            // regenerate the address
+            for (let i = 0; i < restoredIndex; i++) {
+                await identity.getNextAddress();
+            }
+
+            count = 0;
+            index = 0;
+            restoredIndex = 0;
+            while (count < GAP_LIMIT) {
+                const addr = identity.getAddress(true, index);
+                index++;
+                const history = await getHistory(ws, addr.address.confidentialAddress);
+                if (history.length > 0) {
+                    count = 0;
+                    restoredIndex = index;
+                } else {
+                    count++;
+                }
+            }
+
+            // regenerate the address
+            for (let i = 0; i < restoredIndex; i++) {
+                await identity.getNextChangeAddress();
+            }
+            console.timeEnd('restore');
+
+            const addresses = await identity.getAddresses();
+
+            const keys: Record<string, AddressInterface> = {}
+            for (const addr of addresses) {
+                keys[AddressInfosKey(hashScriptAndReverse(addr.confidentialAddress))] = addr;
+            }
+            await chrome.storage.local.set(keys);
+
+            resolve(addresses);
+        });
+
     }
+    return true;
 });
 
-class BatchServerFetchAPI implements ChainAPI {
-    constructor(private batchServerURL: string = 'https://electrs-batch-blockstream.vulpem.com') { }
-
-    fetchUtxos(addresses: string[], skip?: ((utxo: EsploraUtxo) => boolean) | undefined): Promise<Output[]> {
-        throw new Error('Method not implemented.');
+async function getHistory(ws: WebSocket, address: string): Promise<Array<{ tx_hash: string }>> {
+    const scripthash = hashScriptAndReverse(address);
+    const history = await websocketRequest(ws, 'blockchain.scripthash.get_history', [scripthash]);
+    if (history.length > 0) {
+        await chrome.storage.local.set({ [HistoryKey(scripthash)]: history });
     }
-    fetchTxs(addresses: string[], skip?: ((esploraTx: EsploraTx) => boolean) | undefined): Promise<TxInterface[]> {
-        throw new Error('Method not implemented.');
-    }
-    fetchTxsHex(txids: string[]): Promise<{ txid: string; hex: string; }[]> {
-        throw new Error('Method not implemented.');
-    }
-
-    async addressesHasBeenUsed(addresses: string[]): Promise<boolean[]> {
-        const response = await fetch(
-            `${this.batchServerURL}/addresses/transactions`,
-            { method: 'POST', body: JSON.stringify({ addresses: addresses }), headers: { 'Content-Type': 'application/json' } }
-        );
-        if (response.ok) {
-            const results = [];
-            const resp = await response.json();
-            for (const { transaction } of resp) {
-                results.push(transaction.length > 0);
-            }
-            return results;
-        }
-        return Array(addresses.length).fill(false);
-    }
+    return history;
 }
 
+function hashScriptAndReverse(addr: string): string {
+    return crypto.sha256(address.toOutputScript(addr)).reverse().toString('hex');
+}
 
-function makeRestorerFromChainAPI<T extends IdentityInterface>(
-    id: T,
-    getAddress: (isChange: boolean, index: number) => string
-): Restorer<{ api: ChainAPI; gapLimit: number }, IdentityInterface> {
-    return async ({ gapLimit, api }) => {
-        const restoreFunc = async function (
-            getAddrFunc: (index: number) => Promise<string>
-        ): Promise<number | undefined> {
-            let counter = 0;
-            let next = 0;
-            let maxIndex: number | undefined = undefined;
-
-            while (counter < gapLimit) {
-                const cpyNext = next;
-                // generate a set of addresses from next to (next + gapLimit - 1)
-                const addrs = await Promise.all(
-                    Array.from(Array(gapLimit).keys())
-                        .map((i) => i + cpyNext)
-                        .map(getAddrFunc)
-                );
-
-                const hasBeenUsedArray = await api.addressesHasBeenUsed(addrs);
-
-                let indexInArray = 0;
-                for (const hasBeenUsed of hasBeenUsedArray) {
-                    if (hasBeenUsed) {
-                        maxIndex = indexInArray + next;
-                        counter = 0;
-                    } else {
-                        counter++;
-                        if (counter === gapLimit) return maxIndex; // duplicate the stop condition
-                    }
-                    indexInArray++;
-                }
-
-                next += gapLimit; // increase next
-            }
-
-            return maxIndex;
-        };
-        const restorerExternal = restoreFunc((index: number) => {
-            return Promise.resolve(getAddress(false, index));
+function websocketRequest(ws: WebSocket, method: string, params: any[]): Promise<any> {
+    // wait for ws to be connected
+    if (ws.readyState !== WebSocket.OPEN) {
+        return new Promise((resolve) => {
+            ws.onopen = () => {
+                resolve(websocketRequest(ws, method, params));
+            };
         });
+    }
 
-        const restorerInternal = restoreFunc((index: number) => {
-            return Promise.resolve(getAddress(true, index));
-        });
+    const id = Math.ceil(Math.random() * 1e5);
 
-        const [lastUsedExternalIndex, lastUsedInternalIndex] = await Promise.all([
-            restorerExternal,
-            restorerInternal,
-        ]);
-
-        return restorerFromState(id)({
-            lastUsedExternalIndex,
-            lastUsedInternalIndex,
-        });
+    const payload = {
+        jsonrpc: '2.0',
+        method,
+        params,
+        id,
     };
-}
+
+    console.debug('ElectrumWS SEND:', method, ...params);
+    ws.send(JSON.stringify(payload));
+
+    return new Promise((resolve, reject) => {
+        ws.onmessage = (event) => {
+            const { result, error } = JSON.parse(event.data);
+            if (error) {
+                reject(error);
+            } else {
+                resolve(result);
+            }
+        };
+    });
+
+}    
