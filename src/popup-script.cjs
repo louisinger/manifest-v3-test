@@ -1,9 +1,5 @@
 chrome.storage.local.onChanged.addListener(function(changes, namespace) {
     console.log('storage changed')
-    if (changes.address) {
-        console.log('address changed: ', changes.address.newValue)
-        document.getElementById('result').innerHTML = changes.address.newValue;
-    }
 })
 
 // on click of the button, send a message to the background script

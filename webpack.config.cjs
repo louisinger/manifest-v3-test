@@ -11,7 +11,7 @@ module.exports = {
   },
   entry: {
     'popup-script': './src/popup-script.cjs',
-    'test': './src/test.ts',
+    'background': './src/background.ts',
   },
   module: {
     rules: [
