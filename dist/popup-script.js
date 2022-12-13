@@ -1,3 +1,0 @@
-/*! For license information please see popup-script.js.LICENSE.txt */
-chrome.storage.local.onChanged.addListener((function(e,n){console.log("storage changed"),e.address&&(console.log("address changed: ",e.address.newValue),document.getElementById("result").innerHTML=e.address.newValue)})),document.getElementById("restore").addEventListener("click",(()=>{const e=document.querySelector("input").value;console.log("restore button clicked: ",e),chrome.runtime.sendMessage({message:"start_restore",mnemonic:document.querySelector("input").value},(function(e){console.log("response: ",e)}))}));
-//# sourceMappingURL=popup-script.js.map
