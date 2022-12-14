@@ -4,6 +4,7 @@ import { BIP32Factory } from 'bip32';
 import * as bip39 from 'bip39';
 import Account from './account';
 import ElectrumWS from './electrum';
+import { ChromeStorage } from './storage';
 
 
 const bip32 = BIP32Factory(ecc);
@@ -20,19 +21,27 @@ MainAccount m/84'/1776'/0'
 */
 
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  console.debug('storage changed', changes, areaName);
+chrome.storage.onChanged.addListener((changes) => {
+  console.debug('storage changed', changes);
 });
 
 
-chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
-  const network = networks.testnet;
+chrome.runtime.onMessage.addListener(async function (request, sender, sendResponse) {
+  
+  console.log(sender.tab ?
+    "from a content script:" + sender.tab.url :
+    "from the extension");
 
   if (request.message === 'start_restore') {
     console.log('start restore');
-
-    return new Promise(async (resolve, reject) => {
+    
+      const network = networks.testnet;
       const mnemonic = request.mnemonic;
+
+      console.log('mnemonic', mnemonic);
+
+      if (!bip39.validateMnemonic(mnemonic))
+        throw new Error('Invalid mnemonic');
 
       const seed = bip39.mnemonicToSeedSync(mnemonic);
       const node = bip32.fromSeed(seed, network);
@@ -42,14 +51,13 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         node, 
         electrum, 
         network,  
-        storage: chrome.storage.local,
-        baseDerivationPath: Account.BASE_DERIVATION_PATH_LEGACY,
       });
 
-      const { lastUsed, historyTxsId, heightsSet, txidHeight } = await account.sync();
-
-      resolve({ lastUsed, historyTxsId, heightsSet, txidHeight });
-    });
+      //console.log('account', account);
+      const { lastUsed, historyTxsId, heightsSet, txidHeight } = await account.sync(1);
+      //console.log(lastUsed, historyTxsId, heightsSet, txidHeight);
+      //Promise.resolve({ lastUsed, historyTxsId, heightsSet, txidHeight }).then((res) => sendResponse(res));
+      sendResponse({ lastUsed, historyTxsId, heightsSet, txidHeight });
   }
   return true;
 });

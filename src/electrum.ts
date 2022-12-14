@@ -1,4 +1,4 @@
-import {crypto} from 'liquidjs-lib';
+import { crypto } from 'liquidjs-lib';
 
 export interface GetHistoryResponse {
   tx_hash: string;
@@ -14,13 +14,13 @@ export default class ElectrumWS implements ElectrumClient {
 
   static ElectrumBlockstreamLiquid = "wss://blockstream.info/liquid/electrum-websocket/api";
   static ElectrumBlockstreamTestnet = "wss://blockstream.info/liquidtestnet/electrum-websocket/api";
-  
+
   private ws: WebSocket;
 
 
   constructor(webSocketURL: string = ElectrumWS.ElectrumBlockstreamLiquid) {
     this.ws = new WebSocket(webSocketURL);
-   }
+  }
 
   async batchScriptGetHistory(scripts: Buffer[]): Promise<GetHistoryResponse[][]> {
     const requests = scripts.map((script) => {
@@ -29,6 +29,11 @@ export default class ElectrumWS implements ElectrumClient {
     });
     const histories = await this.batchedWebsocketRequest(requests);
     return histories;
+  }
+
+
+  private prepareRequest(id: number, method: string, params: any[]): { jsonrcp: string, id: number, method: string, params: any[] } {
+    return ({ jsonrcp: '2.0', id, method, params });
   }
 
   private async batchedWebsocketRequest(requests: { method: string; params: any[] }[]): Promise<any[]> {
@@ -45,33 +50,33 @@ export default class ElectrumWS implements ElectrumClient {
 
     let id = Math.ceil(Math.random() * 1e5);
 
-    const payloads = requests.map(({ method, params }) => {
+    const payloads = requests.length > 1 ? requests.map(({ method, params }) => {
       id++;
       argumentsByID[id] = params[0];
-      return {
-        jsonrpc: '2.0',
-        method,
-        params,
-        id,
-      };
-    });
+      return this.prepareRequest(id, method, params);
+    }) : this.prepareRequest(id, requests[0].method, requests[0].params);
 
-    //console.debug('ElectrumWS SEND:', requests);
-    ws.send(JSON.stringify(payloads));
+    const payloadString = JSON.stringify(payloads);
+    console.debug('Electrum WS request: ', payloadString);
+    ws.send(payloadString);
 
 
     return new Promise((resolve, reject) => {
+      ws.onerror = (error) => {
+        reject(error);
+      };
+
       ws.onmessage = (event) => {
         const { result, error } = JSON.parse(event.data);
-        if (result && Array.isArray(result) && result[0] && result[0].id) {
-          // this is a batch request response
-          for (let r of result) {
-            r.param = argumentsByID[r.id];
-          }
-        }
         if (error) {
           reject(error);
         } else {
+          if (result && Array.isArray(result) && result[0] && result[0].id) {
+            // this is a batch request response
+            for (let r of result) {
+              r.param = argumentsByID[r.id];
+            }
+          }
           resolve(result);
         }
       };

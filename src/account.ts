@@ -20,7 +20,7 @@ export default class Account {
   constructor({
     node,
     electrum,
-    network = networks.liquid, 
+    network = networks.liquid,
     storage = new ChromeStorage(),
     baseDerivationPath = Account.BASE_DERIVATION_PATH_LEGACY,
   }: {
@@ -48,12 +48,13 @@ export default class Account {
       if (!script) continue;
       scripts.push(script);
       //store
-      await this.cache.set({ scriptHexToDerivationPath: { [script.toString('hex')]: `${this.baseDerivationPath}/${chain}/${i}` }});
+      const kv = { [script.toString('hex')]: `${this.baseDerivationPath}/${chain}/${i}` };
+      await this.cache.set({ scriptHexToDerivationPath: kv });
     }
     return scripts;
   }
 
- 
+
   async sync(gapLimit = GAP_LIMIT): Promise<{
     lastUsed: { internal: number, external: number },
     historyTxsId: Set<string>,
@@ -73,41 +74,44 @@ export default class Account {
 
       while (true) {
         const batch = await this.deriveBatch(batchCount, gapLimit, isInternal);
-        const histories = await this.electrum.batchScriptGetHistory(batch);
-
-        let max = histories
-          .map((v, i) => v.length > 0 ? i : -1)
-          .reduce((a, b) => Math.max(a, b));
-        if (max >= 0) {
-          if (isInternal) {
-            lastUsed.internal = max + batchCount * gapLimit;
-          } else {
-            lastUsed.external = max + batchCount * gapLimit;
-          }
-        }
-
-
-        let flattened: GetHistoryResponse[] = histories.flat();
-        console.log(`${i}/batch(${batchCount}) ${flattened.length}`);
-
-        if (flattened.length === 0) {
-          break;
-        }
-
-
-        for (let el of flattened) {
-          let height = Math.max(el.height, 0);
-          heightsSet.add(height as number);
-          if (height === 0) {
-            txidHeight.set(el.tx_hash, undefined);
-          } else {
-            txidHeight.set(el.tx_hash, height as number);
+        try {
+          const histories = await this.electrum.batchScriptGetHistory(batch);
+          let max = histories
+            .map((v, i) => v.length > 0 ? i : -1)
+            .reduce((a, b) => Math.max(a, b));
+          if (max >= 0) {
+            if (isInternal) {
+              lastUsed.internal = max + batchCount * gapLimit;
+            } else {
+              lastUsed.external = max + batchCount * gapLimit;
+            }
           }
 
-          historyTxsId.add(el.tx_hash);
-        }
 
-        batchCount += 1;
+          let flattened: GetHistoryResponse[] = histories.flat();
+          console.log(`${i}/batch(${batchCount}) ${flattened.length}`);
+
+          if (flattened.length === 0) {
+            break;
+          }
+
+
+          for (let el of flattened) {
+            let height = Math.max(el.height, 0);
+            heightsSet.add(height as number);
+            if (height === 0) {
+              txidHeight.set(el.tx_hash, undefined);
+            } else {
+              txidHeight.set(el.tx_hash, height as number);
+            }
+
+            historyTxsId.add(el.tx_hash);
+          }
+
+          batchCount += 1;
+        } catch (error: any) {
+          throw new Error(error);
+        }
       }
     }
 
