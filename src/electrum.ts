@@ -4,8 +4,13 @@ export interface GetHistoryResponse {
   tx_hash: string;
   height: number;
 }
+// ElectrumClient exposes ElectrumX methods via WebSockets interface
+export interface ElectrumClient {
+  // batch request for 'blockchain.scripthash.get_history'
+  batchScriptGetHistory(scripts: Buffer[]): Promise<GetHistoryResponse[][]>;
+}
 
-export default class ElectrumWS {
+export default class ElectrumWS implements ElectrumClient {
   constructor(private ws: WebSocket) { }
 
   async batchScriptGetHistory(scripts: Buffer[]): Promise<GetHistoryResponse[][]> {
