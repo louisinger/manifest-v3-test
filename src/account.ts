@@ -46,9 +46,9 @@ export default class Account {
       const p2wpkh = payments.p2wpkh({ pubkey: child.publicKey, network: this.network });
       const script = p2wpkh.output;
       if (!script) continue;
-      //store
-      await this.cache.set({ [script.toString('hex')]: `${this.baseDerivationPath}/${chain}/${i}`});
       scripts.push(script);
+      //store
+      await this.cache.set({ scriptHexToDerivationPath: { [script.toString('hex')]: `${this.baseDerivationPath}/${chain}/${i}` }});
     }
     return scripts;
   }
@@ -111,6 +111,7 @@ export default class Account {
       }
     }
 
+    await this.cache.set({ lastUsed, historyTxsId, heightsSet, txidHeight });
     return { lastUsed, historyTxsId, heightsSet, txidHeight };
   }
 

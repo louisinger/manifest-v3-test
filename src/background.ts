@@ -47,8 +47,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
       });
 
       const { lastUsed, historyTxsId, heightsSet, txidHeight } = await account.sync();
-  
-      chrome.storage.local.set({ lastUsed, historyTxsId, heightsSet, txidHeight });
+
       resolve({ lastUsed, historyTxsId, heightsSet, txidHeight });
     });
   }
