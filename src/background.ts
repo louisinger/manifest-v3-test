@@ -4,7 +4,6 @@ import { BIP32Factory } from 'bip32';
 import * as bip39 from 'bip39';
 import Account from './account';
 import ElectrumWS from './electrum';
-import { sync } from './syncer';
 
 
 const bip32 = BIP32Factory(ecc);
@@ -38,12 +37,16 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
       const seed = bip39.mnemonicToSeedSync(mnemonic);
       const node = bip32.fromSeed(seed, network);
     
-      const account = new Account(node, network);
-      const electrum = new ElectrumWS(
-        new WebSocket('wss://blockstream.info/liquidtestnet/electrum-websocket/api')
-      );
+      const electrum = new ElectrumWS(ElectrumWS.ElectrumBlockstreamTestnet);
+      const account = new Account({
+        node, 
+        electrum, 
+        network,  
+        storage: chrome.storage.local,
+        baseDerivationPath: Account.BASE_DERIVATION_PATH_LEGACY,
+      });
 
-      const { lastUsed, historyTxsId, heightsSet, txidHeight } = await sync(account, electrum);
+      const { lastUsed, historyTxsId, heightsSet, txidHeight } = await account.sync();
   
       chrome.storage.local.set({ lastUsed, historyTxsId, heightsSet, txidHeight });
       resolve({ lastUsed, historyTxsId, heightsSet, txidHeight });

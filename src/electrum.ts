@@ -11,7 +11,16 @@ export interface ElectrumClient {
 }
 
 export default class ElectrumWS implements ElectrumClient {
-  constructor(private ws: WebSocket) { }
+
+  static ElectrumBlockstreamLiquid = "wss://blockstream.info/liquid/electrum-websocket/api";
+  static ElectrumBlockstreamTestnet = "wss://blockstream.info/liquidtestnet/electrum-websocket/api";
+  
+  private ws: WebSocket;
+
+
+  constructor(webSocketURL: string = ElectrumWS.ElectrumBlockstreamLiquid) {
+    this.ws = new WebSocket(webSocketURL);
+   }
 
   async batchScriptGetHistory(scripts: Buffer[]): Promise<GetHistoryResponse[][]> {
     const requests = scripts.map((script) => {
@@ -69,3 +78,4 @@ export default class ElectrumWS implements ElectrumClient {
     });
   }
 }
+
