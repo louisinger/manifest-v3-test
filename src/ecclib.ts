@@ -4,8 +4,6 @@
  * This is useful for browsers that do not let us embed .wasm file in content-script context.
  */
 
-console.log('ecclib.ts is loaded');
-
 // @ts-ignore
 // eslint-disable-next-line
 import b64wasm from 'tiny-secp256k1-lib/secp256k1.wasm';

@@ -54,7 +54,7 @@ chrome.runtime.onMessage.addListener(async function (request, sender, sendRespon
       });
 
       //console.log('account', account);
-      const { lastUsed, historyTxsId, heightsSet, txidHeight } = await account.sync(1);
+      const { lastUsed, historyTxsId, heightsSet, txidHeight } = await account.sync(20);
       //console.log(lastUsed, historyTxsId, heightsSet, txidHeight);
       //Promise.resolve({ lastUsed, historyTxsId, heightsSet, txidHeight }).then((res) => sendResponse(res));
       sendResponse({ lastUsed, historyTxsId, heightsSet, txidHeight });

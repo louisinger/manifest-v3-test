@@ -32,8 +32,8 @@ export default class ElectrumWS implements ElectrumClient {
   }
 
 
-  private prepareRequest(id: number, method: string, params: any[]): { jsonrcp: string, id: number, method: string, params: any[] } {
-    return ({ jsonrcp: '2.0', id, method, params });
+  private prepareRequest(id: number, method: string, params: any[]): { jsonrpc: string, id: number, method: string, params: any[] } {
+    return ({ jsonrpc: '2.0', id, method, params });
   }
 
   private async batchedWebsocketRequest(requests: { method: string; params: any[] }[]): Promise<any[]> {
@@ -50,34 +50,34 @@ export default class ElectrumWS implements ElectrumClient {
 
     let id = Math.ceil(Math.random() * 1e5);
 
-    const payloads = requests.length > 1 ? requests.map(({ method, params }) => {
+    const payloads = requests.map(({ method, params }) => {
       id++;
       argumentsByID[id] = params[0];
       return this.prepareRequest(id, method, params);
-    }) : this.prepareRequest(id, requests[0].method, requests[0].params);
+    });
 
-    const payloadString = JSON.stringify(payloads);
-    console.debug('Electrum WS request: ', payloadString);
-    ws.send(payloadString);
+    for (const payload of payloads) {
+      ws.send(JSON.stringify(payload));
+    }
 
 
-    return new Promise((resolve, reject) => {
-      ws.onerror = (error) => {
-        reject(error);
-      };
+    // wait for all responses
+    return new Promise((resolve) => {
+      let responses: any[] = [];
+      let responsesCount = 0;
+
+      const handleResponse = (response: { id: number; result: any; }) => {
+        console.log('parse', response)
+        const { id, result } = response;
+        responses[argumentsByID[id]] = result;
+        responsesCount++;
+      }
 
       ws.onmessage = (event) => {
-        const { result, error } = JSON.parse(event.data);
-        if (error) {
-          reject(error);
-        } else {
-          if (result && Array.isArray(result) && result[0] && result[0].id) {
-            // this is a batch request response
-            for (let r of result) {
-              r.param = argumentsByID[r.id];
-            }
-          }
-          resolve(result);
+        const responses = event.data.split(' ').map(JSON.parse)
+        responses.forEach(handleResponse)
+        if (responsesCount === payloads.length) {
+          resolve(responses);
         }
       };
     });

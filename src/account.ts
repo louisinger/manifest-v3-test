@@ -78,7 +78,7 @@ export default class Account {
           const histories = await this.electrum.batchScriptGetHistory(batch);
           let max = histories
             .map((v, i) => v.length > 0 ? i : -1)
-            .reduce((a, b) => Math.max(a, b));
+            .reduce((a, b) => Math.max(a, b), -1);
           if (max >= 0) {
             if (isInternal) {
               lastUsed.internal = max + batchCount * gapLimit;
