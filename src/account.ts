@@ -1,13 +1,13 @@
 import { BIP32Interface } from "bip32";
-import { networks, payments, crypto } from "liquidjs-lib";
-import ElectrumWS, { ElectrumClient, GetHistoryResponse } from "./electrum";
+import { networks, payments } from "liquidjs-lib";
+import { ChainSource, GetHistoryResponse } from "./chainsource";
 import { ChromeStorage, StorageInterface } from "./storage";
 
 
 const GAP_LIMIT = 20;
 
 export default class Account {
-  public electrum: ElectrumClient;
+  public chainSource: ChainSource;
   public network: networks.Network;
   private node: BIP32Interface;
   private cache: StorageInterface;
@@ -19,20 +19,20 @@ export default class Account {
 
   constructor({
     node,
-    electrum,
+    chainSource,
     network = networks.liquid,
     storage = new ChromeStorage(),
     baseDerivationPath = Account.BASE_DERIVATION_PATH_LEGACY,
   }: {
     node: BIP32Interface,
-    electrum: ElectrumClient,
+    chainSource: ChainSource,
     network?: networks.Network,
     storage?: StorageInterface,
     baseDerivationPath?: string,
   }) {
     this.node = node.derivePath(baseDerivationPath);
     this.network = network;
-    this.electrum = electrum;
+    this.chainSource = chainSource;
     this.cache = storage;
     this.baseDerivationPath = baseDerivationPath;
   }
@@ -75,7 +75,7 @@ export default class Account {
       while (true) {
         const batch = await this.deriveBatch(batchCount, gapLimit, isInternal);
         try {
-          const histories = await this.electrum.batchScriptGetHistory(batch);
+          const histories = await this.chainSource.batchScriptGetHistory(batch);
           let max = histories
             .map((v, i) => v.length > 0 ? i : -1)
             .reduce((a, b) => Math.max(a, b), -1);
@@ -88,7 +88,7 @@ export default class Account {
           }
 
 
-          let flattened: GetHistoryResponse[] = histories.flat();
+          let flattened = histories.flat();
           console.log(`${i}/batch(${batchCount}) ${flattened.length}`);
 
           if (flattened.length === 0) {
