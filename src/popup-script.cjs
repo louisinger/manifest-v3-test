@@ -3,25 +3,18 @@ chrome.storage.local.onChanged.addListener(function(changes, namespace) {
 })
 
 document.getElementById('clear').addEventListener('click', async () => {
-    console.log('clear button clicked')
-    const resp = await chrome.runtime.sendMessage({
+    await chrome.runtime.sendMessage({
         message: "reset"
     });
-    console.log('resp: ', resp)
     document.getElementById('address_restored').innerText = "";
 });
 
 // on click of the button, send a message to the background script
 document.getElementById('restore').addEventListener('click', async () => {
-    const mnemonic = document.querySelector('input').value;
-    console.log('restore button clicked: ', mnemonic)
-    
-
     const resp = await chrome.runtime.sendMessage({
         message: "restore",
         data: { mnemonic: document.querySelector('input').value }
     });
-    console.log('resp: ', resp)
     if (resp.error) { 
         document.getElementById('address_restored').innerText = resp.error;
         return;
@@ -32,11 +25,19 @@ document.getElementById('restore').addEventListener('click', async () => {
 });
 
 document.getElementById('subscribe').addEventListener('click', async () => {
-    console.log('subscribe button clicked')
     const resp = await chrome.runtime.sendMessage({
         message: "subscribe",
         data: { mnemonic: document.querySelector('input').value }
     });
     console.log('resp: ', resp)
     document.getElementById('address_restored').innerText = "";
+});
+
+document.getElementById('getNextAddress').addEventListener('click', async () => {
+    const resp = await chrome.runtime.sendMessage({
+        message: "getNextAddress",
+        data: { mnemonic: document.querySelector('input').value }
+    });
+    console.log('resp: ', resp)
+    document.getElementById('address_restored').innerText = resp;
 });

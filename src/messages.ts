@@ -6,6 +6,7 @@ export interface Message<T extends string, D extends any> {
 export type RestoreMessage = Message<'restore', { mnemonic: string }>;
 export type SubscribeAccountMessage = Message<'subscribeAccount', { mnemonic: string }>;
 export type ResetMessage = Message<'reset', never>;
+export type GetNextAddressMessage = Message<'getNextAddress', { mnemonic: string }>;
 
 export function isRestoreMessage(message: any): message is RestoreMessage {
     return message.message === 'restore';
@@ -17,4 +18,8 @@ export function isSubscribeMessage(message: any): message is SubscribeAccountMes
 
 export function isResetMessage(message: any): message is ResetMessage {
     return message.message === 'reset';
+}
+
+export function isGetNextAddressMessage(message: any): message is GetNextAddressMessage {
+    return message.message === 'getNextAddress';
 }

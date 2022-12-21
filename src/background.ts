@@ -4,7 +4,8 @@ import { BIP32Factory } from 'bip32';
 import * as bip39 from 'bip39';
 import Account from './account';
 import { WsElectrumChainSource } from './chainsource';
-import { isResetMessage, isRestoreMessage, isSubscribeMessage } from './types';
+import { isGetNextAddressMessage, isResetMessage, isRestoreMessage, isSubscribeMessage } from './messages';
+import { ChromeRepository, StaticStorageKey } from './storage';
 
 const bip32 = BIP32Factory(ecc);
 
@@ -34,8 +35,21 @@ function handleError(sendResponse: Function) {
   }
 }
 
-chrome.storage.onChanged.addListener((changes) => {
-  console.debug('storage changed', changes);
+chrome.storage.onChanged.addListener(async (changes: Record<string, chrome.storage.StorageChange>) => {
+  console.info('Storage changed', changes);
+  for (const key in changes) {
+    if (StaticStorageKey.TX_IDS === key) {
+      const newTxIDs = changes[key].newValue as string[] | undefined;
+      if (!newTxIDs) continue; // it means we just deleted the key
+      const oldTxIDs = changes[key].oldValue ? changes[key].oldValue as string[] : [];
+      
+      // for all new txs, we need to fetch the tx hex
+      const oldTxIDsSet = new Set(oldTxIDs);
+      const txIDsToFetch = newTxIDs.filter(txID => !oldTxIDsSet.has(txID));
+      const transactions = await chainSource.fetchTransactions(txIDsToFetch);
+      await ChromeRepository.updateTxDetails(Object.fromEntries(transactions.map((tx, i) => [txIDsToFetch[i], tx])));
+    } 
+  }
 });
 
 chrome.runtime.onMessage.addListener(function (request, _, sendResponse) {
@@ -57,7 +71,14 @@ chrome.runtime.onMessage.addListener(function (request, _, sendResponse) {
       .then(sendResponse)
       .catch(handleError(sendResponse));
     return true;
-  } 
+  } else if (isGetNextAddressMessage(request)) {
+    const mnemonic = request.data.mnemonic;
+    const account = createAccount(mnemonic);
+    account.getNextAddress(false)
+      .then(sendResponse)
+      .catch(handleError(sendResponse));
+    return true;
+  }
 });
 
 

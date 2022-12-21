@@ -1,3 +1,5 @@
+import { ListUnspentResponse } from "./chainsource";
+
 type MaybeNull<T> = Promise<T | null>;
 
 export interface TxDetails {
@@ -11,11 +13,12 @@ export interface WalletRepository {
   getLastUsedIndexes(): MaybeNull<{ internal?: number, external?: number }>;
   getWalletTransactions(): MaybeNull<Array<string>>;
   setScriptHexDerivationPath(script: string, path: string): Promise<void>;
-  updateTxDetails(txID: string, details: TxDetails): Promise<void>;
+  updateTxDetails(txIDtoDetails: Record<string, TxDetails>): Promise<void>;
+  updateScriptUnspents(scriptToUnspents: Record<string, ListUnspentResponse>): Promise<void>;
 }
 
 // static keys
-enum Keys {
+export enum StaticStorageKey {
   TX_IDS = 'txids',
   INTERNAL_INDEX = 'internalIndex',
   EXTERNAL_INDEX = 'externalIndex',
@@ -23,37 +26,60 @@ enum Keys {
 
 // dynamic keys
 const TxDetailsKey = (txid: string) => `txdetails-${txid}`;
+const ScriptUnspentsKey = (script: string) => `unspents-${script}`;
+
+/**
+ * Browser storage is a key-value store
+ * 
+ * TX_IDS => all wallet transactions ids
+ * INTERNAL_INDEX => last used internal index for the main account
+ * EXTERNAL_INDEX => last used external index for the main account
+ * TxDetailsKey(txid) => tx details (height, hex) for a given txid
+ * ScriptUnspentsKey(script) => list of unspents (as outpoint) for a given script
+ */
+
 
 export const ChromeRepository: WalletRepository = {
   async getWalletTransactions(): MaybeNull<Array<string>> {
-    const tx = await chrome.storage.local.get([Keys.TX_IDS]);
-    return tx[Keys.TX_IDS] as Array<string> ?? null;
+    const tx = await chrome.storage.local.get([StaticStorageKey.TX_IDS]);
+    return tx[StaticStorageKey.TX_IDS] as Array<string> ?? null;
   },
   async getLastUsedIndexes(): MaybeNull<{ internal?: number; external?: number; }> {
-    const indexes = await chrome.storage.local.get([Keys.INTERNAL_INDEX, Keys.EXTERNAL_INDEX]);
+    const indexes = await chrome.storage.local.get([StaticStorageKey.INTERNAL_INDEX, StaticStorageKey.EXTERNAL_INDEX]);
     return {
-      internal: indexes[Keys.INTERNAL_INDEX] as number ?? undefined,
-      external: indexes[Keys.EXTERNAL_INDEX] as number ?? undefined,
+      internal: indexes[StaticStorageKey.INTERNAL_INDEX] as number ?? undefined,
+      external: indexes[StaticStorageKey.EXTERNAL_INDEX] as number ?? undefined,
     };
   },
   async addWalletTransactions(...txIDs: string[]): Promise<void> {
-    const data = await chrome.storage.local.get([Keys.TX_IDS]);
-    const txids = new Set(data[Keys.TX_IDS] as Array<string> ?? []);
+    const data = await chrome.storage.local.get([StaticStorageKey.TX_IDS]);
+    const txids = new Set(data[StaticStorageKey.TX_IDS] as Array<string> ?? []);
     for (const txid of txIDs) {
       txids.add(txid);
     }
-    await chrome.storage.local.set({ [Keys.TX_IDS]: Array.from(txids) });
+    await chrome.storage.local.set({ [StaticStorageKey.TX_IDS]: Array.from(txids) });
   },
   setLastUsedIndex(index: number, isInternal: boolean): Promise<void> {
-    const key = isInternal ? Keys.INTERNAL_INDEX : Keys.EXTERNAL_INDEX;
+    const key = isInternal ? StaticStorageKey.INTERNAL_INDEX : StaticStorageKey.EXTERNAL_INDEX;
     return chrome.storage.local.set({ [key]: index });
   },
-  async updateTxDetails(txID: string, details: TxDetails): Promise<void> {
-    const key = TxDetailsKey(txID);
-    const currentDetails = (await chrome.storage.local.get([key]))[key] as TxDetails ?? {};
-    return chrome.storage.local.set({ [key]: { ...currentDetails, ...details } });
+  async updateTxDetails(txIDtoDetails: Record<string, TxDetails>): Promise<void> {
+    const keys = Object.keys(txIDtoDetails).map(TxDetailsKey);
+    const detailsInStorage = await chrome.storage.local.get(keys);
+
+    return chrome.storage.local.set(Object.fromEntries(
+        Object.entries(txIDtoDetails)
+          .map(([txid, details]) => [TxDetailsKey(txid), { ...detailsInStorage[TxDetailsKey(txid)], ...details }])
+      )
+    );
   },
   setScriptHexDerivationPath: function (script: string, path: string): Promise<void> {
     return chrome.storage.local.set({ [script]: path });
-  }
+  },
+  updateScriptUnspents(scriptToUnspents: Record<string, ListUnspentResponse>): Promise<void> {
+    return chrome.storage.local.set(Object.fromEntries(
+      Object.entries(scriptToUnspents)
+        .map(([script, unspents]) => [ScriptUnspentsKey(script), unspents])
+    ));
+  },
 }

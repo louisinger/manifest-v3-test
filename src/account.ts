@@ -3,7 +3,6 @@ import { networks, payments } from "liquidjs-lib";
 import { ChainSource } from "./chainsource";
 import { ChromeRepository, WalletRepository } from "./storage";
 
-
 const GAP_LIMIT = 20;
 
 export default class Account {
@@ -52,6 +51,16 @@ export default class Account {
     return scripts;
   }
 
+  async getNextAddress(isInternal: boolean): Promise<string> {
+    const lastIndexes = await this.cache.getLastUsedIndexes();
+    const lastUsed = lastIndexes ? lastIndexes[isInternal ? 'internal' : 'external'] ?? 0 : 0;
+    const scripts = await this.deriveBatch(lastUsed, lastUsed + 1, isInternal);
+    const script = scripts[0]; 
+    const address = payments.p2wpkh({ output: script, network: this.network }).address;
+    if (!address) throw new Error('Could not derive address');
+    return address;
+  }
+
 
   async sync(gapLimit = GAP_LIMIT): Promise<{
     lastUsed: { internal: number, external: number },
@@ -67,19 +76,24 @@ export default class Account {
       external: cachedLastUsed?.external || 0,
     }
 
+    // we need to cache the restored script in order to fetch the unspents once we have the whole history
+    const scriptsRestored: Buffer[] = [];
+
     const walletChains = [0, 1];
     for (const i of walletChains) {
       const isInternal = i === 1;
       let batchCount = isInternal ? lastUsed.internal : lastUsed.external;
       let unusedScriptCounter = 0;
 
+
       while (unusedScriptCounter < gapLimit) {
         const scripts = await this.deriveBatch(batchCount, batchCount + gapLimit, isInternal);
-        const histories = await this.chainSource.batchScriptGetHistory(scripts);
+        const histories = await this.chainSource.fetchHistories(scripts);
         console.log(`${isInternal ? "internal" : "external"}/batch(${batchCount}) ${histories.flat().length}`);
 
         for (const [index, history] of histories.entries()) {
           if (history.length > 0) {
+            scriptsRestored.push(scripts[index]);
             unusedScriptCounter = 0; // reset counter
             const newMaxIndex = index + batchCount;
             if (isInternal) lastUsed.internal = newMaxIndex;
@@ -95,16 +109,19 @@ export default class Account {
             unusedScriptCounter++;
           }
         }
-        console.log('consecutive unused script:', unusedScriptCounter)
         batchCount += gapLimit;
       }
     }
 
-    await Promise.all([
+    // fetch the unspents
+    const unspents = await this.chainSource.fetchUnspentOutputs(scriptsRestored);
+
+    await Promise.allSettled([
       this.cache.addWalletTransactions(...historyTxsId),
       this.cache.setLastUsedIndex(lastUsed.internal, true),
       this.cache.setLastUsedIndex(lastUsed.external, false),
-      ...Array.from(txidHeight.entries()).map(([txid, height]) => this.cache.updateTxDetails(txid, { height })),
+      this.cache.updateScriptUnspents(Object.fromEntries(unspents.filter(ls => ls.length > 0).map((utxos, index) => [scriptsRestored[index].toString('hex'), utxos]))),
+      this.cache.updateTxDetails(Object.fromEntries(Array.from(historyTxsId).map(txid => [txid, { height: txidHeight.get(txid) }]))),
     ]);
 
     return {
@@ -119,17 +136,19 @@ export default class Account {
   async subscribeBatch(start: number, end: number, isInternal: boolean): Promise<void> {
     const scripts = await this.deriveBatch(start, end, isInternal);
     for (const script of scripts) {
-      await this.chainSource.subscribeScriptStatus(script, async (scripthash: string, status: string | null) => { 
+      await this.chainSource.subscribeScriptStatus(script, async (_: string, status: string | null) => { 
         console.log('script status changed', script.toString('hex'), status)
-        const history = await this.chainSource.batchScriptGetHistory([script]);
+        const history = await this.chainSource.fetchHistories([script]);
         const historyTxId = history[0].map(({ tx_hash }) => tx_hash);
-        const txidHeight = new Map(history[0].map(({ tx_hash, height }) => [tx_hash, height]));
 
         await Promise.all([
           this.cache.addWalletTransactions(...historyTxId),
-          ...Array.from(txidHeight.entries()).map(([txid, height]) => this.cache.updateTxDetails(txid, { height })),
+          this.cache.updateTxDetails(Object.fromEntries(history[0].map(({ tx_hash, height }) => [tx_hash, { height }]))),
         ]);
 
+        const unspents = await this.chainSource.fetchUnspentOutputs([script]);
+        const unspentForScript = unspents[0];
+        await this.cache.updateScriptUnspents({ [script.toString('hex')]: unspentForScript });
       });
     }
   }
