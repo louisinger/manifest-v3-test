@@ -170,9 +170,9 @@ export class ElectrumWS extends Observable {
 
   public async unsubscribe(method: string, ...params: (string | number)[]) {
     const subscriptionKey = `${method}${typeof params[0] === 'string' ? `-${params[0]}` : ''}`;
-    this.subscriptions.delete(subscriptionKey);
+    const deleted = this.subscriptions.delete(subscriptionKey);
 
-    return this.request(`${method}.unsubscribe`, ...params);
+    if (deleted) return this.request(`${method}.unsubscribe`, ...params);
   }
 
   public isConnected() {

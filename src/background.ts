@@ -4,60 +4,60 @@ import { BIP32Factory } from 'bip32';
 import * as bip39 from 'bip39';
 import Account from './account';
 import { WsElectrumChainSource } from './chainsource';
+import { isResetMessage, isRestoreMessage, isSubscribeMessage } from './types';
 
 const bip32 = BIP32Factory(ecc);
 
+const NETWORK = networks.testnet;
 
-/* 
-MainAccount m/84'/1776'/0'
+// instantiate the websocket client
+const chainSource = WsElectrumChainSource.fromNetwork(NETWORK.name);
 
-0. counter external/internal 0 - 0 
-1. pubkey > scriptHash - parent - store 
-2. get_history - worker - store > 0 txs
-3. tx.get - worker
-4. unblind - worker 
-*/
+function createAccount(mnemonic: string): Account {
+  if (!bip39.validateMnemonic(mnemonic))
+    throw new Error('Invalid mnemonic');
+  
+  const seed = bip39.mnemonicToSeedSync(mnemonic);
+  const node = bip32.fromSeed(seed, NETWORK);
 
+  return new Account({
+    node,
+    chainSource,
+    network: NETWORK,
+  });
+}
+
+function handleError(sendResponse: Function) {
+  return function(error: unknown) {
+    console.error(error);
+    sendResponse({ error });
+  }
+}
 
 chrome.storage.onChanged.addListener((changes) => {
   console.debug('storage changed', changes);
 });
 
-
-chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
-  console.log(sender.tab ?
-    "from a content script:" + sender.tab.url :
-    "from the extension");
-
-  if (request.message === 'start_restore') {
-    console.log('start restore');
-    
-      const network = networks.testnet;
-      const mnemonic = request.mnemonic;
-
-      console.log('mnemonic', mnemonic);
-
-      if (!bip39.validateMnemonic(mnemonic))
-        throw new Error('Invalid mnemonic');
-
-      const seed = bip39.mnemonicToSeedSync(mnemonic);
-      const node = bip32.fromSeed(seed, network);
-    
-      const chainSource = WsElectrumChainSource.testnet();
-      const account = new Account({
-        node, 
-        chainSource, 
-        network,  
-      });
-
-      account.sync(20).then((res) => {
-        console.log('sync result', res);
-        sendResponse(res);
-      });
-      return true;
-  }
-  return false;
+chrome.runtime.onMessage.addListener(function (request, _, sendResponse) {
+  if (isResetMessage(request)) {
+    chrome.storage.local.clear();
+    sendResponse();
+  } else if (isRestoreMessage(request)) {
+    const mnemonic = request.data.mnemonic;
+    const account = createAccount(mnemonic);
+    account.sync(20)
+      .then(sendResponse)
+      .catch(handleError(sendResponse));  
+    return true;
+  } else if (isSubscribeMessage(request)) {
+    const mnemonic = request.data.mnemonic;
+    const account = createAccount(mnemonic);
+    account.unsubscribeAll()
+      .then(() => account.subscribeAll())
+      .then(sendResponse)
+      .catch(handleError(sendResponse));
+    return true;
+  } 
 });
-
 
 

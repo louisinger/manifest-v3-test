@@ -1,7 +1,7 @@
 import { BIP32Interface } from "bip32";
 import { networks, payments } from "liquidjs-lib";
-import { ChainSource, GetHistoryResponse } from "./chainsource";
-import { ChromeStorage, StorageInterface } from "./storage";
+import { ChainSource } from "./chainsource";
+import { ChromeRepository, WalletRepository } from "./storage";
 
 
 const GAP_LIMIT = 20;
@@ -10,7 +10,7 @@ export default class Account {
   public chainSource: ChainSource;
   public network: networks.Network;
   private node: BIP32Interface;
-  private cache: StorageInterface;
+  private cache: WalletRepository;
   private baseDerivationPath: string;
 
   static BASE_DERIVATION_PATH = "m/84'/1776'/0'";
@@ -21,13 +21,13 @@ export default class Account {
     node,
     chainSource,
     network = networks.liquid,
-    storage = new ChromeStorage(),
+    storage = ChromeRepository,
     baseDerivationPath = Account.BASE_DERIVATION_PATH_LEGACY,
   }: {
     node: BIP32Interface,
     chainSource: ChainSource,
     network?: networks.Network,
-    storage?: StorageInterface,
+    storage?: WalletRepository,
     baseDerivationPath?: string,
   }) {
     this.node = node.derivePath(baseDerivationPath);
@@ -47,9 +47,7 @@ export default class Account {
       const script = p2wpkh.output;
       if (!script) continue;
       scripts.push(script);
-      //store
-      const kv = { [script.toString('hex')]: `${this.baseDerivationPath}/${chain}/${i}` };
-      await this.cache.set({ scriptHexToDerivationPath: kv });
+      await this.cache.setScriptHexDerivationPath(script.toString('hex'), `${this.baseDerivationPath}/${chain}/${i}`);
     }
     return scripts;
   }
@@ -57,66 +55,119 @@ export default class Account {
 
   async sync(gapLimit = GAP_LIMIT): Promise<{
     lastUsed: { internal: number, external: number },
-    historyTxsId: Set<string>,
-    heightsSet: Set<number>,
-    txidHeight: Map<string, number | undefined>
   }> {
 
     let historyTxsId: Set<string> = new Set();
     let heightsSet: Set<number> = new Set();
     let txidHeight: Map<string, number | undefined> = new Map();
 
-    let lastUsed = { internal: 0, external: 0 };
+    const cachedLastUsed = await this.cache.getLastUsedIndexes();
+    let lastUsed = {
+      internal: cachedLastUsed?.internal || 0,
+      external: cachedLastUsed?.external || 0,
+    }
+
     const walletChains = [0, 1];
     for (const i of walletChains) {
       const isInternal = i === 1;
-      let batchCount = 0;
+      let batchCount = isInternal ? lastUsed.internal : lastUsed.external;
+      let unusedScriptCounter = 0;
 
-      while (true) {
-        const batch = await this.deriveBatch(batchCount, gapLimit, isInternal);
-        try {
-          const histories = await this.chainSource.batchScriptGetHistory(batch);
-          let max = histories
-            .map((v, i) => v.length > 0 ? i : -1)
-            .reduce((a, b) => Math.max(a, b), -1);
-          if (max >= 0) {
-            if (isInternal) {
-              lastUsed.internal = max + batchCount * gapLimit;
-            } else {
-              lastUsed.external = max + batchCount * gapLimit;
+      while (unusedScriptCounter < gapLimit) {
+        const scripts = await this.deriveBatch(batchCount, batchCount + gapLimit, isInternal);
+        const histories = await this.chainSource.batchScriptGetHistory(scripts);
+        console.log(`${isInternal ? "internal" : "external"}/batch(${batchCount}) ${histories.flat().length}`);
+
+        for (const [index, history] of histories.entries()) {
+          if (history.length > 0) {
+            unusedScriptCounter = 0; // reset counter
+            const newMaxIndex = index + batchCount;
+            if (isInternal) lastUsed.internal = newMaxIndex;
+            else lastUsed.external = newMaxIndex;
+
+            // update the history set
+            for (const { tx_hash, height } of history) {
+              historyTxsId.add(tx_hash);
+              if (height !== undefined) heightsSet.add(height);
+              txidHeight.set(tx_hash, height);
             }
+          } else {
+            unusedScriptCounter++;
           }
-
-
-          let flattened = histories.flat();
-          console.log(`${i}/batch(${batchCount}) ${flattened.length}`);
-
-          if (flattened.length === 0) {
-            break;
-          }
-
-
-          for (let el of flattened) {
-            let height = Math.max(el.height, 0);
-            heightsSet.add(height as number);
-            if (height === 0) {
-              txidHeight.set(el.tx_hash, undefined);
-            } else {
-              txidHeight.set(el.tx_hash, height as number);
-            }
-
-            historyTxsId.add(el.tx_hash);
-          }
-
-          batchCount += 1;
-        } catch (error: any) {
-          throw new Error(error);
         }
+        console.log('consecutive unused script:', unusedScriptCounter)
+        batchCount += gapLimit;
       }
     }
 
-    await this.cache.set({ lastUsed, historyTxsId, heightsSet, txidHeight });
-    return { lastUsed, historyTxsId, heightsSet, txidHeight };
+    await Promise.all([
+      this.cache.addWalletTransactions(...historyTxsId),
+      this.cache.setLastUsedIndex(lastUsed.internal, true),
+      this.cache.setLastUsedIndex(lastUsed.external, false),
+      ...Array.from(txidHeight.entries()).map(([txid, height]) => this.cache.updateTxDetails(txid, { height })),
+    ]);
+
+    return {
+      lastUsed: {
+        internal: lastUsed.internal,
+        external: lastUsed.external,
+      }
+    };
   }
 
+  // subscribe to addresses in a range
+  async subscribeBatch(start: number, end: number, isInternal: boolean): Promise<void> {
+    const scripts = await this.deriveBatch(start, end, isInternal);
+    for (const script of scripts) {
+      await this.chainSource.subscribeScriptStatus(script, async (scripthash: string, status: string | null) => { 
+        console.log('script status changed', script.toString('hex'), status)
+        const history = await this.chainSource.batchScriptGetHistory([script]);
+        const historyTxId = history[0].map(({ tx_hash }) => tx_hash);
+        const txidHeight = new Map(history[0].map(({ tx_hash, height }) => [tx_hash, height]));
+
+        await Promise.all([
+          this.cache.addWalletTransactions(...historyTxId),
+          ...Array.from(txidHeight.entries()).map(([txid, height]) => this.cache.updateTxDetails(txid, { height })),
+        ]);
+
+      });
+    }
+  }
+
+  async unsubscribeBatch(start: number, end: number, isInternal: boolean): Promise<void> {
+    const scripts = await this.deriveBatch(start, end, isInternal);
+    for (const script of scripts) {
+      await this.chainSource.unsubscribeScriptStatus(script);
+    }
+  }
+
+  async subscribeAll(): Promise<void> {
+    const cachedLastUsed = await this.cache.getLastUsedIndexes();
+    const lastUsed = {
+      internal: cachedLastUsed?.internal || 0,
+      external: cachedLastUsed?.external || 0,
+    }
+
+    const walletChains = [0, 1];
+    for (const i of walletChains) {
+      const isInternal = i === 1;
+      let batchCount = isInternal ? lastUsed.internal : lastUsed.external;
+      await this.subscribeBatch(batchCount, batchCount + GAP_LIMIT, isInternal);
+    }
+  }
+
+  async unsubscribeAll(): Promise<void> {
+    const cachedLastUsed = await this.cache.getLastUsedIndexes();
+    const lastUsed = {
+      internal: cachedLastUsed?.internal || 0,
+      external: cachedLastUsed?.external || 0,
+    }
+
+    const walletChains = [0, 1];
+    for (const i of walletChains) {
+      const isInternal = i === 1;
+      let batchCount = isInternal ? lastUsed.internal : lastUsed.external;
+      await this.unsubscribeBatch(batchCount, batchCount + GAP_LIMIT, isInternal);
+    }
+  }
 }
