@@ -32,7 +32,7 @@ export class WalletRepositoryUnblinder implements Unblinder {
                 const script = output.script.toString('hex');
 
                 // if output is unconfidential, we don't need to unblind it
-                if (!output.rangeProof || !output.surjectionProof) {
+                if (!isConfidentialOutput(output)) {
                     unblindingResults.push({
                         value: confidentialValueToSatoshi(output.value),
                         asset: AssetHash.fromBytes(output.asset).hex,
@@ -58,8 +58,12 @@ export class WalletRepositoryUnblinder implements Unblinder {
                     valueBlindingFactor: unblinded.valueBlindingFactor.toString('hex'),
                 });
 
-            } catch (e: any) {
-                unblindingResults.push(new Error('unable to unblind output: ', e));
+            } catch (e: unknown) {
+                if (e instanceof Error) {
+                    unblindingResults.push(e);
+                } else {
+                    unblindingResults.push(new Error('unable to unblind output (unknown error)'));
+                }
                 continue;
             }
         }
@@ -68,3 +72,20 @@ export class WalletRepositoryUnblinder implements Unblinder {
     }
 }
 
+const emptyNonce: Buffer = Buffer.from('0x00', 'hex');
+
+function bufferNotEmptyOrNull(buffer?: Buffer): boolean {
+  return buffer != null && buffer.length > 0;
+}
+
+function isConfidentialOutput({
+  rangeProof,
+  surjectionProof,
+  nonce,
+}: any): boolean {
+  return (
+    bufferNotEmptyOrNull(rangeProof) &&
+    bufferNotEmptyOrNull(surjectionProof) &&
+    nonce !== emptyNonce
+  );
+}

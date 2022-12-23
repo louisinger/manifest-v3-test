@@ -97,12 +97,17 @@ chrome.storage.onChanged.addListener(async (changes: Record<string, chrome.stora
       });
 
       const unblindedResults = await unblinder.unblind(...outputs);
+      const errors = unblindedResults.filter(u => u instanceof Error) as Error[];
       const successfullyUnblinded = unblindedResults.filter(u => !(u instanceof Error)) as UnblindingData[];
 
       await ChromeRepository.updateOutpointBlindingData(successfullyUnblinded.map((unblinded, i) => {
         const utxo = utxosToUnblind[i];
         return [{ txID: utxo.tx_hash, vout: utxo.tx_pos }, unblinded];
       }))
+
+      if (errors.length > 0) {
+        console.error('Errors while unblinding', errors);
+      }
       console.timeEnd('handle new unspents')
     }
   }
