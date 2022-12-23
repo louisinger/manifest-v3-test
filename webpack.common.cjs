@@ -8,7 +8,7 @@ module.exports = {
     topLevelAwait: true,
   },
   entry: {
-    'popup-script': './src/popup-script.cjs',
+    'popup-script': './src/popup-script.ts',
     'background': './src/background.ts',
   },
   module: {

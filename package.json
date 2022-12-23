@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "license": "MIT",
   "scripts": {
-    "build": "webpack --mode production",
-    "dev": "webpack --mode development",
-    "watch": "webpack --mode development --watch"
+    "build": "webpack --mode production --config webpack.prod.cjs",
+    "dev": "webpack --mode development --config webpack.dev.cjs",
+    "watch": "webpack --mode development --watch --config webpack.dev.cjs"
   },
   "type": "module",
   "devDependencies": {
