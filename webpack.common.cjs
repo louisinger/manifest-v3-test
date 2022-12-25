@@ -2,16 +2,14 @@ const path = require('path');
 const { CleanWebpackPlugin } = require('clean-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 const { ProvidePlugin } = require('webpack');
-const TerserPlugin = require('terser-webpack-plugin');
 
 module.exports = {
-  devtool: 'cheap-module-source-map',
   experiments: {
     topLevelAwait: true,
   },
   entry: {
-    'popup-script': './src/popup-script.cjs',
-    'test': './src/test.ts',
+    'popup-script': './src/popup-script.ts',
+    'background': './src/background.ts',
   },
   module: {
     rules: [
@@ -46,17 +44,4 @@ module.exports = {
     }),
   ],
   output: { filename: '[name].js', path: path.resolve(__dirname, 'dist') },
-  optimization: {
-    minimize: true,
-    minimizer: [
-      new TerserPlugin({
-        terserOptions: {
-          ecma: 6,
-          mangle: {
-            reserved: ['Buffer']
-          },
-        },
-      }),
-    ],
-  },
 };

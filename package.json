@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "license": "MIT",
   "scripts": {
-    "build": "webpack --mode production",
-    "dev": "webpack --mode development",
-    "watch": "webpack --mode development --watch"
+    "build": "webpack --mode production --config webpack.prod.cjs",
+    "dev": "webpack --mode development --config webpack.dev.cjs",
+    "watch": "webpack --mode development --watch --config webpack.dev.cjs"
   },
   "type": "module",
   "devDependencies": {
@@ -21,10 +21,13 @@
   },
   "dependencies": {
     "@vulpemventures/secp256k1-zkp": "^2.1.1",
+    "bip32": "^3.1.0",
+    "bip39": "^3.0.4",
     "buffer": "^6.0.3",
     "crypto-browserify": "^3.12.0",
-    "ldk": "^0.5.8",
+    "liquidjs-lib": "^6.0.2-liquid.23",
     "path-browserify": "^1.0.1",
+    "slip77": "^0.2.0",
     "stream-browserify": "^3.0.0",
     "tiny-secp256k1": "^2.2.1"
   }
